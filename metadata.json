@@ -1,5 +1,5 @@
 {
-  "name": "Webinaarin Tarkistuslista",
-  "description": "Tarkistuslista webinaarin osatavoitteiden ymmärtämisen varmistamiseen.",
+  "name": "Webinaarin tarkistuslista",
+  "description": "Tarkistuslista webinaarin osallistujille oppimisen seurantaan ja palautteen antoon.",
   "requestFramePermissions": []
 }
