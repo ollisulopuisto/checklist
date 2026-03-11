@@ -17,28 +17,44 @@ const defaultQuestions = [
   'Pystyn jakamaan oppimani asiat muille.'
 ];
 
-const encodeData = (data: string[]) => {
-  // Pakataan data lz-stringillä, joka on suunniteltu erityisesti URL-turvalliseen pakkaukseen
-  return LZString.compressToEncodedURIComponent(JSON.stringify(data));
+const MAX_NAME_LENGTH = 100;
+const MAX_FEEDBACK_LENGTH = 1000;
+const MAX_QUESTION_LENGTH = 200;
+const MAX_QUESTIONS = 20;
+
+const validateData = (data: any): string[] | null => {
+  if (!Array.isArray(data)) return null;
+  
+  // Varmistetaan, että jokainen alkio on merkkijono ja rajoitetaan määrää/pituutta
+  const validated = data
+    .filter((item): item is string => typeof item === 'string')
+    .map(item => item.trim())
+    .filter(item => item.length > 0 && item.length <= MAX_QUESTION_LENGTH)
+    .slice(0, MAX_QUESTIONS);
+    
+  return validated.length > 0 ? validated : null;
 };
 
 const decodeData = (encoded: string): string[] | null => {
+  let decoded: any = null;
   try {
-    // Yritetään ensin purkaa uudella lz-string -formaatilla
     const decompressed = LZString.decompressFromEncodedURIComponent(encoded);
     if (decompressed) {
-      return JSON.parse(decompressed);
+      decoded = JSON.parse(decompressed);
     }
   } catch (e) {
     // Ohitetaan virhe ja yritetään vanhaa formaattia
   }
   
-  try {
-    // Taaksepäin yhteensopivuus: yritetään vanhaa base64-formaattia
-    return JSON.parse(decodeURIComponent(atob(encoded)));
-  } catch (e) {
-    return null;
+  if (!decoded) {
+    try {
+      decoded = JSON.parse(decodeURIComponent(atob(encoded)));
+    } catch (e) {
+      return null;
+    }
   }
+
+  return validateData(decoded);
 };
 
 export default function App() {
@@ -50,9 +66,9 @@ export default function App() {
   const [saved, setSaved] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   
-  // Admin state
-  const [isAdminMode, setIsAdminMode] = useState(false);
-  const [adminQuestions, setAdminQuestions] = useState<string[]>(defaultQuestions);
+  // Editor state
+  const [isEditorMode, setIsEditorMode] = useState(false);
+  const [editorQuestions, setEditorQuestions] = useState<string[]>(defaultQuestions);
   const [generatedUrl, setGeneratedUrl] = useState('');
   const [urlCopied, setUrlCopied] = useState(false);
 
@@ -67,10 +83,11 @@ export default function App() {
 
     if (q) {
       const decoded = decodeData(q);
-      if (decoded && Array.isArray(decoded)) {
+      if (decoded) {
         initialQuestions = decoded;
-        // Create a unique storage key for this specific questionnaire
-        currentStorageKey = 'webinar_checklist_' + q.substring(0, 20);
+        // Käytetään vain pientä osaa koodatusta datasta avaimessa ja validoidaan se
+        const safePrefix = q.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20);
+        currentStorageKey = 'webinar_checklist_' + safePrefix;
       }
     }
     
@@ -86,15 +103,18 @@ export default function App() {
     if (savedData) {
       try {
         const parsed = JSON.parse(savedData);
-        if (parsed.userName) {
-          setUserName(parsed.userName);
-          // Merge saved checked state with current questions
+        if (parsed.userName && typeof parsed.userName === 'string') {
+          setUserName(parsed.userName.substring(0, MAX_NAME_LENGTH));
+          
           const mergedItems = initialItems.map(item => {
-            const savedItem = parsed.items?.find((i: ChecklistItem) => i.id === item.id && i.text === item.text);
-            return savedItem ? { ...item, checked: savedItem.checked } : item;
+            const savedItem = Array.isArray(parsed.items) 
+              ? parsed.items.find((i: any) => i.id === item.id && i.text === item.text)
+              : null;
+            return savedItem ? { ...item, checked: !!savedItem.checked } : item;
           });
+          
           setItems(mergedItems);
-          setFeedback(parsed.feedback || '');
+          setFeedback(typeof parsed.feedback === 'string' ? parsed.feedback.substring(0, MAX_FEEDBACK_LENGTH) : '');
           setHasStarted(true);
           return;
         }
@@ -108,17 +128,19 @@ export default function App() {
 
   const handleStart = (e: React.FormEvent) => {
     e.preventDefault();
-    if (userName.trim()) {
+    const cleanName = userName.trim().substring(0, MAX_NAME_LENGTH);
+    if (cleanName) {
+      setUserName(cleanName);
       setHasStarted(true);
-      saveData(userName, items, feedback);
+      saveData(cleanName, items, feedback);
     }
   };
 
   const saveData = (name: string, currentItems: ChecklistItem[], currentFeedback: string) => {
     localStorage.setItem(storageKey, JSON.stringify({
-      userName: name,
-      items: currentItems,
-      feedback: currentFeedback
+      userName: name.substring(0, MAX_NAME_LENGTH),
+      items: currentItems.map(i => ({ id: i.id, text: i.text, checked: !!i.checked })),
+      feedback: currentFeedback.substring(0, MAX_FEEDBACK_LENGTH)
     }));
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -131,7 +153,6 @@ export default function App() {
   const confirmLogout = () => {
     setHasStarted(false);
     setUserName('');
-    // Reset items to unchecked
     setItems(items.map(i => ({ ...i, checked: false })));
     setFeedback('');
     setShowLogoutConfirm(false);
@@ -170,24 +191,30 @@ export default function App() {
     window.location.href = `mailto:?subject=${subject}&body=${body}`;
   };
 
-  // Admin functions
-  const addAdminQuestion = () => {
-    setAdminQuestions([...adminQuestions, '']);
+  // Editor functions
+  const addEditorQuestion = () => {
+    if (editorQuestions.length < MAX_QUESTIONS) {
+      setEditorQuestions([...editorQuestions, '']);
+    }
   };
 
-  const updateAdminQuestion = (index: number, value: string) => {
-    const newQs = [...adminQuestions];
-    newQs[index] = value;
-    setAdminQuestions(newQs);
+  const updateEditorQuestion = (index: number, value: string) => {
+    const newQs = [...editorQuestions];
+    newQs[index] = value.substring(0, MAX_QUESTION_LENGTH);
+    setEditorQuestions(newQs);
   };
 
-  const removeAdminQuestion = (index: number) => {
-    const newQs = adminQuestions.filter((_, i) => i !== index);
-    setAdminQuestions(newQs);
+  const removeEditorQuestion = (index: number) => {
+    const newQs = editorQuestions.filter((_, i) => i !== index);
+    setEditorQuestions(newQs);
   };
 
   const generateUrl = () => {
-    const validQuestions = adminQuestions.filter(q => q.trim() !== '');
+    const validQuestions = editorQuestions
+      .map(q => q.trim())
+      .filter(q => q !== '')
+      .slice(0, MAX_QUESTIONS);
+      
     if (validQuestions.length === 0) return;
     
     const encoded = encodeData(validQuestions);
@@ -206,12 +233,12 @@ export default function App() {
     }
   };
 
-  if (isAdminMode) {
+  if (isEditorMode) {
     return (
       <div className="min-h-screen bg-stone-50 py-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-3xl mx-auto">
           <button 
-            onClick={() => setIsAdminMode(false)}
+            onClick={() => setIsEditorMode(false)}
             className="flex items-center text-stone-500 hover:text-stone-800 mb-6 transition-colors"
           >
             <ArrowLeft className="w-4 h-4 mr-2" />
@@ -226,7 +253,7 @@ export default function App() {
             <div className="bg-stone-800 px-8 py-8 text-white">
               <div className="flex items-center mb-2">
                 <Settings className="w-6 h-6 mr-3 text-stone-300" />
-                <h1 className="text-2xl font-bold tracking-tight">Luo räätälöity kysely</h1>
+                <h1 className="text-2xl font-bold tracking-tight">Luo uusi kyselylista</h1>
               </div>
               <p className="text-stone-300">
                 Määritä omat oppimistavoitteet tai kysymykset. Kun olet valmis, luo linkki ja jaa se osallistujille.
@@ -235,19 +262,19 @@ export default function App() {
             
             <div className="p-8">
               <div className="space-y-4 mb-8">
-                {adminQuestions.map((q, index) => (
+                {editorQuestions.map((q, index) => (
                   <div key={index} className="flex items-start gap-3">
                     <div className="flex-grow">
                       <input
                         type="text"
                         value={q}
-                        onChange={(e) => updateAdminQuestion(index, e.target.value)}
+                        onChange={(e) => updateEditorQuestion(index, e.target.value)}
                         placeholder={`Kysymys ${index + 1}`}
                         className="w-full px-4 py-3 border-2 border-stone-200 rounded-xl focus:ring-stone-500 focus:border-stone-500 transition-colors outline-none"
                       />
                     </div>
                     <button
-                      onClick={() => removeAdminQuestion(index)}
+                      onClick={() => removeEditorQuestion(index)}
                       className="p-3 text-red-500 hover:bg-red-50 rounded-xl transition-colors border-2 border-transparent hover:border-red-100"
                       title="Poista kysymys"
                     >
@@ -258,11 +285,12 @@ export default function App() {
               </div>
               
               <button
-                onClick={addAdminQuestion}
-                className="flex items-center text-stone-600 hover:text-stone-900 font-medium mb-8 transition-colors"
+                onClick={addEditorQuestion}
+                disabled={editorQuestions.length >= MAX_QUESTIONS}
+                className="flex items-center text-stone-600 hover:text-stone-900 font-medium mb-8 transition-colors disabled:opacity-50"
               >
                 <Plus className="w-5 h-5 mr-1" />
-                Lisää uusi kysymys
+                Lisää uusi kysymys ({editorQuestions.length}/{MAX_QUESTIONS})
               </button>
               
               <div className="border-t border-stone-200 pt-8">
@@ -343,6 +371,7 @@ export default function App() {
                     type="text"
                     id="name"
                     required
+                    maxLength={MAX_NAME_LENGTH}
                     value={userName}
                     onChange={(e) => setUserName(e.target.value)}
                     className="block w-full pl-10 pr-3 py-3 border-2 border-stone-200 rounded-xl focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm transition-colors outline-none"
@@ -362,11 +391,11 @@ export default function App() {
         </motion.div>
         
         <button 
-          onClick={() => setIsAdminMode(true)}
+          onClick={() => setIsEditorMode(true)}
           className="mt-8 flex items-center text-sm text-stone-400 hover:text-stone-600 transition-colors"
         >
           <Settings className="w-4 h-4 mr-1" />
-          Ylläpitäjä: Luo räätälöity kysely
+          Luo räätälöity kyselylista
         </button>
       </div>
     );
@@ -382,7 +411,7 @@ export default function App() {
               animate={{ opacity: 1, x: 0 }}
               className="flex items-center bg-white px-4 py-2 rounded-xl shadow-sm border border-stone-200"
             >
-              <span className="text-sm text-stone-600 mr-3">Oletko varma?</span>
+              <span className="text-sm text-stone-600 mr-3">Poista tiedot laitteelta?</span>
               <button onClick={confirmLogout} className="text-sm font-medium text-red-600 hover:text-red-700 mr-3 transition-colors">Kyllä</button>
               <button onClick={() => setShowLogoutConfirm(false)} className="text-sm font-medium text-stone-500 hover:text-stone-700 transition-colors">Peruuta</button>
             </motion.div>
@@ -392,7 +421,7 @@ export default function App() {
               className="flex items-center text-sm text-stone-500 hover:text-stone-800 transition-colors px-4 py-2"
             >
               <LogOut className="w-4 h-4 mr-2" />
-              Vaihda käyttäjää
+              Nollaa ja kirjaudu ulos
             </button>
           )}
         </div>
@@ -470,6 +499,7 @@ export default function App() {
               <textarea
                 id="feedback"
                 rows={4}
+                maxLength={MAX_FEEDBACK_LENGTH}
                 value={feedback}
                 onChange={(e) => setFeedback(e.target.value)}
                 placeholder="Mitä muuta haluaisit kertoa webinaarista? Oliko jokin asia erityisen hyödyllinen tai jäikö jokin epäselväksi?"
@@ -528,8 +558,8 @@ export default function App() {
           </div>
         </motion.div>
         
-        <p className="text-center text-stone-400 text-sm mt-8">
-          Tämä sovellus toimii selaimessasi. Tietojasi ei tallenneta palvelimelle.
+        <p className="text-center text-stone-400 text-xs mt-8 max-w-md mx-auto">
+          Tämä sovellus toimii paikallisesti selaimessasi. Tietoja ei lähetetä palvelimelle. Käytämme vain välttämätöntä selaimen muistia (localStorage) edistymisesi tallentamiseen.
         </p>
       </div>
     </div>
