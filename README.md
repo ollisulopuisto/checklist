@@ -2,7 +2,7 @@
 
 Tämä on yksinkertainen ja helppokäyttöinen selainsovellus webinaarin osallistujille. Sen avulla osallistujat voivat seurata omaa oppimistaan, reflektoida webinaarin antia ja antaa palautetta järjestäjälle.
 
-👉 **[Kokeile sovellusta tästä!](https://ollisulopuisto.github.io/journo-ai-koulutus/)**
+👉 **[Kokeile sovellusta tästä!](https://ollisulopuisto.github.io/checklist/)**
 
 ## Miten sovellus toimii?
 

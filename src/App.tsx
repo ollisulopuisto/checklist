@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { CheckCircle2, Circle, Copy, Mail, Check, Award, Save, LogOut, User, Settings, Plus, Trash2, ArrowLeft, Link as LinkIcon } from 'lucide-react';
+import LZString from 'lz-string';
 
 interface ChecklistItem {
   id: string;
@@ -17,11 +18,23 @@ const defaultQuestions = [
 ];
 
 const encodeData = (data: string[]) => {
-  return btoa(encodeURIComponent(JSON.stringify(data)));
+  // Pakataan data lz-stringillä, joka on suunniteltu erityisesti URL-turvalliseen pakkaukseen
+  return LZString.compressToEncodedURIComponent(JSON.stringify(data));
 };
 
 const decodeData = (encoded: string): string[] | null => {
   try {
+    // Yritetään ensin purkaa uudella lz-string -formaatilla
+    const decompressed = LZString.decompressFromEncodedURIComponent(encoded);
+    if (decompressed) {
+      return JSON.parse(decompressed);
+    }
+  } catch (e) {
+    // Ohitetaan virhe ja yritetään vanhaa formaattia
+  }
+  
+  try {
+    // Taaksepäin yhteensopivuus: yritetään vanhaa base64-formaattia
     return JSON.parse(decodeURIComponent(atob(encoded)));
   } catch (e) {
     return null;
